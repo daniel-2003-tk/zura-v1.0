@@ -1,212 +1,112 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@core/config/supabase";
 import { Sidebar } from "@/components/Sidebar";
+import { 
+  ShoppingCart, 
+  Package, 
+  TrendingDown, 
+  AlertTriangle, 
+  Printer, 
+  Menu 
+} from "lucide-react";
 
-type ProdutoCritico = { nome: string; estoque: number };
-type UltimaVenda = { 
-  id: number; 
-  valor_total: number; 
-  metodo_pagamento: string; 
-  clientes: { nome: string } 
-};
-
-export default function DashboardPage() {
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // Indicadores Principais
-  const [faturamentoTotal, setFaturamentoTotal] = useState(0);
-  const [saldoCaixa, setSaldoCaixa] = useState(0);
-  const [fiadosPendentes, setFiadosPendentes] = useState(0);
-  
-  // Alertas e Listas
-  const [produtosCriticos, setProdutosCriticos] = useState<ProdutoCritico[]>([]);
-  const [ultimasVendas, setUltimasVendas] = useState<UltimaVenda[]>([]);
-
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      setIsLoading(true);
-
-      // 1. Faturamento Total (Vendas)
-      const { data: vendas } = await supabase.from("vendas").select("valor_total");
-      if (vendas) {
-        const total = vendas.reduce((acc, curr) => acc + curr.valor_total, 0);
-        setFaturamentoTotal(total);
-      }
-
-      // 2. Saldo do Caixa
-      const { data: caixa } = await supabase.from("caixa").select("tipo, valor");
-      if (caixa) {
-        const saldo = caixa.reduce((acc, curr) => {
-          return curr.tipo === "ENTRADA" ? acc + curr.valor : acc - curr.valor;
-        }, 0);
-        setSaldoCaixa(saldo);
-      }
-
-      // 3. Fiados Pendentes (A Receber)
-      const { data: fiados } = await supabase.from("fiados").select("valor").eq("status", "PENDENTE");
-      if (fiados) {
-        const totalFiados = fiados.reduce((acc, curr) => acc + curr.valor, 0);
-        setFiadosPendentes(totalFiados);
-      }
-
-      // 4. Alerta de Estoque (< 5 unidades)
-      const { data: criticos } = await supabase
-        .from("produtos")
-        .select("nome, estoque")
-        .lt("estoque", 5)
-        .order("estoque", { ascending: true })
-        .limit(5);
-      if (criticos) setProdutosCriticos(criticos);
-
-      // 5. Últimas 5 Vendas
-      const { data: ultimas } = await supabase
-        .from("vendas")
-        .select("id, valor_total, metodo_pagamento, clientes(nome)")
-        .order("id", { ascending: false })
-        .limit(5);
-      if (ultimas) setUltimasVendas(ultimas as any);
-
-      setIsLoading(false);
-    };
-
-    fetchDashboardData();
-  }, []);
-
-  const formatarMoeda = (valor: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
-  };
-
+export default function Dashboard() {
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-[#F4F7FE] flex">
       <Sidebar />
 
-      <div className="flex-1 ml-64 p-8 max-w-7xl mx-auto mt-8">
+      <main className="flex-1 ml-72 p-10">
         
-        <header className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-800">Visão Geral do Negócio</h2>
-          <p className="text-gray-500 text-sm">Acompanhe os principais indicadores do seu Zura ERP.</p>
+        {/* HEADER SUPERIOR */}
+        <header className="flex justify-between items-center mb-10">
+          <Menu className="text-slate-400 cursor-pointer" size={24} />
+          
+          <div className="flex items-center gap-8">
+            <Printer className="text-slate-400 cursor-pointer" size={20} />
+            <div className="flex items-center gap-4 text-right">
+              <div>
+                <p className="text-sm font-bold text-slate-800">Adega TK</p>
+                <p className="text-xs text-slate-400">tikinho2mil0@gmail.com</p>
+              </div>
+              <div className="w-12 h-12 bg-[#0088CC] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-200">
+                TI
+              </div>
+            </div>
+          </div>
         </header>
 
-        {isLoading ? (
-          <div className="flex justify-center items-center h-64 text-gray-400 font-medium animate-pulse">
-            Sincronizando dados com o servidor...
+        <div className="mb-8">
+          <h2 className="text-3xl font-black text-slate-800">Dashboard</h2>
+          <p className="text-slate-500 font-medium">Visão geral do seu negócio</p>
+        </div>
+
+        {/* SEÇÃO DE ALERTAS */}
+        <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 mb-10">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="text-red-500" size={24} />
+              <h3 className="text-lg font-bold text-slate-800">Alertas Inteligentes</h3>
+            </div>
+            <span className="bg-[#E53E3E] text-white text-[11px] font-black px-4 py-1.5 rounded-full uppercase">1 crítico</span>
           </div>
-        ) : (
-          <>
-            {/* CARDS SUPERIORES */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              
-              {/* Card 1: Saldo em Caixa */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:-translate-y-1 transition-transform">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 bg-green-50 rounded-lg text-green-600">💵</div>
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Livre Hoje</span>
-                </div>
-                <div>
-                  <h3 className="text-3xl font-black text-gray-800">{formatarMoeda(saldoCaixa)}</h3>
-                  <p className="text-sm text-gray-500 mt-1">Saldo atual na gaveta</p>
-                </div>
-              </div>
 
-              {/* Card 2: A Receber (Fiados) */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:-translate-y-1 transition-transform">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 bg-orange-50 rounded-lg text-orange-600">📝</div>
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Fiados</span>
-                </div>
-                <div>
-                  <h3 className="text-3xl font-black text-orange-600">{formatarMoeda(fiadosPendentes)}</h3>
-                  <p className="text-sm text-gray-500 mt-1">Total pendente na rua</p>
-                </div>
+          <div className="bg-[#FFF5F5] border border-[#FED7D7] rounded-3xl p-6 flex items-center justify-between">
+            <div className="flex items-center gap-5">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-500 shadow-sm">
+                <Package size={24} />
               </div>
-
-              {/* Card 3: Faturamento Total */}
-              <div className="bg-blue-600 p-6 rounded-2xl shadow-md border border-blue-500 flex flex-col justify-between hover:-translate-y-1 transition-transform text-white">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 bg-blue-500/50 rounded-lg text-white">💰</div>
-                  <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">Histórico</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-slate-800">Estoque Baixo</p>
+                  <span className="bg-[#E53E3E] text-white text-[9px] px-2 py-0.5 rounded font-black uppercase">Crítico</span>
                 </div>
-                <div>
-                  <h3 className="text-3xl font-black">{formatarMoeda(faturamentoTotal)}</h3>
-                  <p className="text-sm text-blue-200 mt-1">Faturamento bruto total</p>
-                </div>
+                <p className="text-sm text-slate-500 mt-0.5">2 produto(s) zerado(s) e 2 abaixo do mínimo</p>
               </div>
-
             </div>
+            <span className="text-slate-400 text-xl font-bold cursor-pointer">→</span>
+          </div>
+        </div>
 
-            {/* SEÇÃO INFERIOR: Alertas e Atividade */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* ALERTA DE ESTOQUE */}
-              <div className="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden col-span-1 flex flex-col">
-                <div className="bg-orange-50/50 p-5 border-b border-orange-100">
-                  <h3 className="font-bold text-orange-800 flex items-center gap-2">
-                    ⚠️ Atenção Necessária
-                  </h3>
-                  <p className="text-xs text-orange-600/80 mt-1">Produtos precisando de reposição</p>
-                </div>
-                <div className="p-5 flex-1">
-                  {produtosCriticos.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-sm text-gray-400">
-                      Estoque sob controle! Nenhum alerta.
-                    </div>
-                  ) : (
-                    <ul className="space-y-4">
-                      {produtosCriticos.map((p, index) => (
-                        <li key={index} className="flex justify-between items-center pb-3 border-b border-gray-50 last:border-0 last:pb-0">
-                          <span className="text-sm font-medium text-gray-700">{p.nome}</span>
-                          <span className="text-xs font-bold px-2 py-1 bg-red-50 text-red-600 rounded-md">
-                            {p.estoque} un
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+        {/* GRID DE CARDS (4 COLUNAS) */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+          <StatCard title="Vendas Hoje" value="0" sub="transações" icon={ShoppingCart} color="text-blue-500" />
+          <StatCard title="Produtos em Falta" value="4" sub="Requer atenção" icon={Package} color="text-orange-500" border="border-orange-100" />
+          <StatCard title="Taxas (30d)" value="R$ 0.00" sub="custos operadoras" icon={TrendingDown} color="text-orange-400" />
+          <StatCard title="Perdas (30d)" value="R$ 0.00" sub="prejuízo operacional" icon={AlertTriangle} color="text-red-400" />
+        </div>
+
+        {/* SEÇÃO FINAL */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 bg-white rounded-[2.5rem] p-8 h-64 border border-slate-100 shadow-sm flex items-center">
+            <h3 className="font-bold text-slate-400">Faturamento</h3>
+          </div>
+          <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between">
+              <h3 className="font-bold text-slate-800">Lucro</h3>
+              <div className="text-right">
+                 <p className="text-3xl font-black text-[#0088CC]">R$ 0.00</p>
+                 <p className="text-xs font-bold text-red-500">↘ 100.0% <span className="text-slate-300 font-normal ml-1">vs 30 dias ant.</span></p>
               </div>
-
-              {/* ÚLTIMAS VENDAS */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden lg:col-span-2 flex flex-col">
-                <div className="p-5 border-b border-gray-100 flex justify-between items-center">
-                  <div>
-                    <h3 className="font-bold text-gray-800">Últimas Movimentações</h3>
-                    <p className="text-xs text-gray-500 mt-1">As 5 vendas mais recentes do sistema</p>
-                  </div>
-                </div>
-                <div className="p-0 flex-1">
-                  {ultimasVendas.length === 0 ? (
-                    <div className="p-10 text-center text-sm text-gray-400">
-                      Nenhuma venda registrada ainda.
-                    </div>
-                  ) : (
-                    <table className="w-full text-left">
-                      <tbody>
-                        {ultimasVendas.map((v) => (
-                          <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                            <td className="p-4 text-sm font-semibold text-gray-700">
-                              {v.clientes?.nome || "Cliente Removido"}
-                            </td>
-                            <td className="p-4 text-sm">
-                              <span className={`px-2 py-1 text-[10px] font-bold uppercase rounded-md ${v.metodo_pagamento === 'FIADO' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
-                                {v.metodo_pagamento}
-                              </span>
-                            </td>
-                            <td className="p-4 text-sm font-bold text-green-600 text-right">
-                              {formatarMoeda(v.valor_total)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
-
             </div>
-          </>
-        )}
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-4">Últimos 30 dias</p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
+
+function StatCard({ title, value, sub, icon: Icon, color, border = "border-slate-50" }: any) {
+  return (
+    <div className={`bg-white p-8 rounded-[2.5rem] shadow-sm border ${border} h-48 flex flex-col justify-between`}>
+      <div className="flex justify-between items-start">
+        <span className="text-sm font-bold text-slate-600">{title}</span>
+        <Icon className={color} size={22} />
+      </div>
+      <div>
+        <h4 className="text-4xl font-black text-slate-800 tracking-tight">{value}</h4>
+        <p className="text-xs text-slate-400 mt-1 font-medium">{sub}</p>
       </div>
     </div>
   );

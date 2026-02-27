@@ -1,333 +1,143 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@core/config/supabase";
 import { Sidebar } from "@/components/Sidebar";
+import { 
+  ShoppingCart, 
+  Package, 
+  ArrowDownRight, 
+  AlertTriangle, 
+  Printer, 
+  Menu,
+  TrendingUp
+} from "lucide-react";
 
-type Venda = {
-  id: number;
-  created_at: string;
-  valor_total: number;
-  quantidade: number;
-  produto_id: number;
-  metodo_pagamento: string;
-  clientes: { nome: string };
-  produtos: { nome: string };
-};
-
-type Produto = {
-  id: number;
-  nome: string;
-  preco: number;
-  estoque: number;
-};
-
-export default function VendasPage() {
-  const [vendas, setVendas] = useState<Venda[]>([]);
-  const [clientes, setClientes] = useState<{id: number, nome: string}[]>([]);
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  const [termoBusca, setTermoBusca] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  
-  const [novaVenda, setNovaVenda] = useState({ 
-    cliente_id: "", 
-    produto_id: "", 
-    quantidade: 1,
-    metodo_pagamento: "PIX" // Valor por defeito
-  });
-
-  const fetchData = async () => {
-    setIsLoading(true);
-    const { data: vendasData } = await supabase
-      .from("vendas")
-      .select(`
-        id, created_at, valor_total, quantidade, produto_id, metodo_pagamento,
-        clientes ( nome ),
-        produtos ( nome )
-      `)
-      .order("id", { ascending: false });
-
-    const { data: clientesData } = await supabase.from("clientes").select("id, nome");
-    const { data: produtosData } = await supabase.from("produtos").select("id, nome, preco, estoque");
-
-    if (vendasData) setVendas(vendasData as any);
-    if (clientesData) setClientes(clientesData);
-    if (produtosData) setProdutos(produtosData);
-    
-    setIsLoading(false);
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const handleSalvarVenda = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-
-    const produtoSelecionado = produtos.find(p => p.id === Number(novaVenda.produto_id));
-    const clienteSelecionado = clientes.find(c => c.id === Number(novaVenda.cliente_id));
-    
-    if (!produtoSelecionado || !clienteSelecionado) {
-      alert("Selecione um produto e um cliente válidos.");
-      setIsSaving(false);
-      return;
-    }
-
-    if (produtoSelecionado.estoque < novaVenda.quantidade) {
-      alert(`⚠️ Stock insuficiente! Tem apenas ${produtoSelecionado.estoque} unidades.`);
-      setIsSaving(false);
-      return;
-    }
-
-    const total = produtoSelecionado.preco * novaVenda.quantidade;
-
-    // 1. Regista a Venda com o método de pagamento
-    const { error: vendaError } = await supabase.from("vendas").insert([
-      { 
-        cliente_id: Number(novaVenda.cliente_id), 
-        produto_id: Number(novaVenda.produto_id), 
-        quantidade: Number(novaVenda.quantidade),
-        valor_total: total,
-        metodo_pagamento: novaVenda.metodo_pagamento
-      }
-    ]);
-
-    if (vendaError) {
-      alert(`❌ Erro ao registar venda: ${vendaError.message}`);
-      setIsSaving(false);
-      return;
-    }
-
-    // 2. Baixa no Stock
-    await supabase
-      .from("produtos")
-      .update({ estoque: produtoSelecionado.estoque - novaVenda.quantidade })
-      .eq("id", produtoSelecionado.id);
-
-    // 3. INTELIGÊNCIA DE ROTAS (Caixa vs Fiado)
-    if (novaVenda.metodo_pagamento === "FIADO") {
-      // Vai para a Caderneta
-      await supabase.from("fiados").insert([
-        {
-          cliente_id: Number(novaVenda.cliente_id),
-          valor: total,
-          descricao: `Venda: ${novaVenda.quantidade}x ${produtoSelecionado.nome}`,
-          status: "PENDENTE"
-        }
-      ]);
-    } else {
-      // Vai para o Caixa
-      await supabase.from("caixa").insert([
-        {
-          tipo: "ENTRADA",
-          valor: total,
-          descricao: `Venda (${novaVenda.metodo_pagamento}): ${novaVenda.quantidade}x ${produtoSelecionado.nome} (${clienteSelecionado.nome})`
-        }
-      ]);
-    }
-
-    setIsSaving(false);
-    setIsModalOpen(false);
-    setNovaVenda({ cliente_id: "", produto_id: "", quantidade: 1, metodo_pagamento: "PIX" });
-    fetchData();
-  };
-
-  const handleDeletarVenda = async (venda: Venda) => {
-    if (!confirm("Deseja cancelar esta venda? O stock será devolvido e as finanças ajustadas.")) return;
-
-    const produto = produtos.find(p => p.id === venda.produto_id);
-    
-    // 1. Devolve o stock
-    if (produto) {
-      const novoEstoque = produto.estoque + venda.quantidade;
-      await supabase.from("produtos").update({ estoque: novoEstoque }).eq("id", produto.id);
-    }
-
-    // 2. Inteligência do Estorno
-    if (venda.metodo_pagamento === "FIADO") {
-      alert("Atenção: Esta venda foi registada a Fiado. Por favor, elimine a dívida manualmente no menu 'Fiados' para não cobrar o cliente indevidamente.");
-    } else {
-      // Lança o Estorno (Saída) no Caixa
-      await supabase.from("caixa").insert([
-        {
-          tipo: "SAIDA",
-          valor: venda.valor_total,
-          descricao: `Estorno de Venda Cancelada: ${venda.produtos?.nome}`
-        }
-      ]);
-    }
-
-    // 3. Elimina a venda do histórico
-    const { error } = await supabase.from("vendas").delete().eq("id", venda.id);
-
-    if (error) {
-      alert("Erro ao cancelar venda.");
-    } else {
-      fetchData();
-    }
-  };
-
-  const vendasFiltradas = vendas.filter((venda) => {
-    const nomeCliente = venda.clientes?.nome?.toLowerCase() || "";
-    const nomeProduto = venda.produtos?.nome?.toLowerCase() || "";
-    const busca = termoBusca.toLowerCase();
-    
-    return nomeCliente.includes(busca) || nomeProduto.includes(busca);
-  });
-
+export default function Dashboard() {
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-[#F8FAFC] flex font-sans">
       <Sidebar />
-      <div className="flex-1 ml-64 p-8 max-w-7xl mx-auto mt-8 relative">
-        
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <div>
-            <h2 className="text-2xl font-semibold text-gray-800">Histórico de Vendas</h2>
-            <p className="text-sm text-gray-500">Faça a gestão de todos os pedidos realizados.</p>
-          </div>
-          
-          <div className="flex gap-4 w-full md:w-auto">
-            <input 
-              type="text" 
-              placeholder="Pesquisar cliente ou produto..." 
-              value={termoBusca}
-              onChange={(e) => setTermoBusca(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-64"
-            />
-            
-            <button 
-              onClick={() => setIsModalOpen(true)}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold transition-colors whitespace-nowrap shadow-sm"
-            >
-              + Nova Venda
-            </button>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Data</th>
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Cliente</th>
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Produto</th>
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Método</th>
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Total</th>
-                <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={6} className="p-10 text-center text-gray-400">A carregar histórico...</td></tr>
-              ) : vendasFiltradas.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="p-10 text-center text-gray-400">
-                    {termoBusca ? "Nenhuma venda encontrada para esta pesquisa." : "Nenhuma venda registada."}
-                  </td>
-                </tr>
-              ) : (
-                vendasFiltradas.map((v) => (
-                  <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                    <td className="p-4 text-sm text-gray-600">{new Date(v.created_at).toLocaleDateString('pt-PT')}</td>
-                    <td className="p-4 text-sm font-semibold text-gray-700">{v.clientes?.nome}</td>
-                    <td className="p-4 text-sm text-gray-600">{v.produtos?.nome} ({v.quantidade}x)</td>
-                    <td className="p-4 text-sm">
-                      <span className={`px-2 py-1 text-xs font-bold rounded-md ${v.metodo_pagamento === 'FIADO' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {v.metodo_pagamento}
-                      </span>
-                    </td>
-                    <td className="p-4 text-sm font-bold text-green-600">
-                      {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(v.valor_total)}
-                    </td>
-                    <td className="p-4 text-sm text-right">
-                      <button 
-                        onClick={() => handleDeletarVenda(v)}
-                        className="text-red-400 hover:text-red-600 font-medium transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
 
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-100">
-              <h3 className="text-xl font-bold text-gray-800 mb-1">Registar Nova Venda</h3>
-              <p className="text-sm text-gray-500 mb-6">Selecione os dados do pedido.</p>
-              
-              <form onSubmit={handleSalvarVenda} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Cliente</label>
-                  <select 
-                    required 
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                    value={novaVenda.cliente_id}
-                    onChange={(e) => setNovaVenda({...novaVenda, cliente_id: e.target.value})}
-                  >
-                    <option value="">Selecione um cliente...</option>
-                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Produto</label>
-                  <select 
-                    required 
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                    value={novaVenda.produto_id}
-                    onChange={(e) => setNovaVenda({...novaVenda, produto_id: e.target.value})}
-                  >
-                    <option value="">Selecione um produto...</option>
-                    {produtos.map(p => (
-                      <option key={p.id} value={p.id}>{p.nome} (Stock: {p.estoque})</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Quantidade</label>
-                    <input 
-                      type="number" min="1" required 
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                      value={novaVenda.quantidade}
-                      onChange={(e) => setNovaVenda({...novaVenda, quantidade: parseInt(e.target.value)})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Pagamento</label>
-                    <select 
-                      required 
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                      value={novaVenda.metodo_pagamento}
-                      onChange={(e) => setNovaVenda({...novaVenda, metodo_pagamento: e.target.value})}
-                    >
-                      <option value="PIX">PIX</option>
-                      <option value="DINHEIRO">Dinheiro</option>
-                      <option value="CARTAO">Cartão</option>
-                      <option value="FIADO">Fiado</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 mt-8">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-500 font-medium hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-                  <button type="submit" disabled={isSaving} className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md transition-all disabled:opacity-50">
-                    {isSaving ? "A processar..." : "Finalizar Pedido"}
-                  </button>
-                </div>
-              </form>
+      <main className="flex-1 ml-64 p-10">
+        
+        {/* TOPBAR - Identica ao Protótipo */}
+        <header className="flex justify-between items-center mb-10">
+          <div className="flex items-center gap-4">
+            <div className="p-2 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors">
+              <Menu size={20} className="text-slate-500" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">Dashboard</h2>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">Visão Geral do Negócio</p>
             </div>
           </div>
-        )}
+
+          <div className="flex items-center gap-8">
+            <Printer className="text-slate-300 cursor-pointer hover:text-slate-600 transition-colors" size={20} />
+            
+            <div className="flex items-center gap-4 border-l border-slate-200 pl-8">
+              <div className="text-right">
+                <p className="text-sm font-bold text-slate-700 leading-tight">Adega TK</p>
+                <p className="text-[11px] text-slate-400 font-medium">tininho2mil0@gmail.com</p>
+              </div>
+              <div className="w-10 h-10 bg-[#0088CC] rounded-2xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200">
+                TI
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* SEÇÃO DE ALERTAS - Com o badge vermelho */}
+        <section className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-red-50 rounded-xl">
+                <AlertTriangle className="text-red-500" size={22} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800">Alertas Inteligentes</h3>
+            </div>
+            <span className="bg-red-500 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
+              1 Crítico
+            </span>
+          </div>
+          
+          <div className="group bg-red-50/40 border border-red-100 rounded-[1.5rem] p-5 flex items-center justify-between hover:bg-red-50 transition-all cursor-pointer">
+            <div className="flex items-center gap-5">
+              <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform">
+                <Package size={24} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Estoque Crítico detectado</p>
+                <p className="text-xs text-slate-500">Existem <span className="text-red-600 font-bold">4 produtos</span> que precisam de reposição imediata.</p>
+              </div>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-400 shadow-sm group-hover:text-red-500">
+              →
+            </div>
+          </div>
+        </section>
+
+        {/* GRID DE CARDS - Spacing ajustado */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <StatCard title="Vendas Hoje" value="0" sub="transações realizadas" icon={ShoppingCart} color="bg-blue-50 text-blue-500" />
+          <StatCard title="Produtos em Falta" value="4" sub="requer atenção" icon={Package} color="bg-orange-50 text-orange-500" border="border-orange-100" />
+          <StatCard title="Taxas (30d)" value="R$ 0,00" sub="custos operadoras" icon={ArrowDownRight} color="bg-slate-50 text-slate-400" />
+          <StatCard title="Perdas (30d)" value="R$ 0,00" sub="prejuízo operacional" icon={AlertTriangle} color="bg-red-50 text-red-400" />
+        </div>
+
+        {/* GRÁFICOS / RESUMO INFERIOR */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[300px]">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <TrendingUp size={18} className="text-blue-500" /> Faturamento Mensal
+              </h3>
+              <select className="text-xs font-bold text-slate-400 bg-slate-50 border-none rounded-lg p-2 outline-none">
+                <option>Últimos 30 dias</option>
+              </select>
+            </div>
+            <div className="h-full flex items-center justify-center text-slate-300 text-sm italic">
+              Gráfico de desempenho será renderizado aqui...
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div>
+              <h3 className="font-bold text-slate-800 mb-1">Lucro Líquido</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Últimos 30 dias</p>
+            </div>
+            
+            <div className="py-6">
+              <h4 className="text-4xl font-black text-blue-600 leading-none">R$ 0,00</h4>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-xs font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-lg">↘ 100.0%</span>
+                <span className="text-[10px] text-slate-400">vs 30 dias ant.</span>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-50">
+              <button className="w-full py-3 bg-slate-50 text-slate-600 text-xs font-bold rounded-2xl hover:bg-slate-100 transition-colors">
+                Ver Relatório Detalhado
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
+
+function StatCard({ title, value, sub, icon: Icon, color, border = "border-slate-100" }: any) {
+  return (
+    <div className={`bg-white p-7 rounded-[2rem] shadow-sm border ${border} flex flex-col justify-between h-44 hover:shadow-md transition-shadow`}>
+      <div className="flex justify-between items-start">
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</span>
+        <div className={`p-2 rounded-xl ${color}`}>
+          <Icon size={18} />
+        </div>
+      </div>
+      <div>
+        <h4 className="text-3xl font-black text-slate-800 tracking-tight">{value}</h4>
+        <p className="text-[10px] font-medium text-slate-400 mt-1">{sub}</p>
       </div>
     </div>
   );
