@@ -1,144 +1,270 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { supabase } from "@core/config/supabase";
 import { Sidebar } from "@/components/Sidebar";
+import { PageHeader } from "@/components/PageHeader";
 import { 
-  ShoppingCart, 
-  Package, 
-  ArrowDownRight, 
-  AlertTriangle, 
-  Printer, 
-  Menu,
-  TrendingUp
+  Search, ShoppingCart, Plus, Minus, Trash2, 
+  Banknote, QrCode, CreditCard, ArrowRight, CheckCircle2
 } from "lucide-react";
 
-export default function Dashboard() {
+export default function VendasPage() {
+  const [produtos, setProdutos] = useState<any[]>([]);
+  const [carrinho, setCarrinho] = useState<any[]>([]);
+  const [busca, setBusca] = useState("");
+  const [loading, setLoading] = useState(true);
+  
+  // Checkout states
+  const [metodo, setMetodo] = useState("PIX");
+  const [valorRecebido, setValorRecebido] = useState("");
+  const [isFinalizando, setIsFinalizando] = useState(false);
+
+  useEffect(() => {
+    const fetchProdutos = async () => {
+      const { data } = await supabase.from("produtos").select("*").order("nome");
+      if (data) setProdutos(data);
+      setLoading(false);
+    };
+    fetchProdutos();
+  }, []);
+
+  const formatBRL = (v: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v) || 0);
+
+  // --- LÓGICA DO CARRINHO ---
+  const adicionarProduto = (produto: any) => {
+    setCarrinho(prev => {
+      const existe = prev.find(p => p.id === produto.id);
+      if (existe) {
+        return prev.map(p => p.id === produto.id ? { ...p, qtd: p.qtd + 1 } : p);
+      }
+      return [...prev, { ...produto, qtd: 1 }];
+    });
+  };
+
+  const alterarQtd = (id: number, delta: number) => {
+    setCarrinho(prev => prev.map(p => {
+      if (p.id === id) {
+        const novaQtd = p.qtd + delta;
+        return novaQtd > 0 ? { ...p, qtd: novaQtd } : p;
+      }
+      return p;
+    }));
+  };
+
+  const removerProduto = (id: number) => {
+    setCarrinho(prev => prev.filter(p => p.id !== id));
+  };
+
+  // --- CÁLCULOS BLINDADOS ---
+  const totalCarrinho = carrinho.reduce((acc, curr) => acc + (Number(curr.preco_un) * curr.qtd), 0);
+  const troco = metodo === "DINHEIRO" && valorRecebido ? (Number(valorRecebido) - totalCarrinho) : 0;
+
+  // --- FINALIZAR VENDA ---
+  const finalizarVenda = async () => {
+    if (carrinho.length === 0) return alert("Adicione produtos ao carrinho.");
+    if (metodo === "DINHEIRO" && troco < 0) return alert("Valor recebido é menor que o total.");
+    
+    setIsFinalizando(true);
+
+    try {
+      // 1. Criar a venda principal
+      const { data: vendaData, error: vendaError } = await supabase
+        .from("vendas")
+        .insert([{ 
+          valor_total: totalCarrinho, 
+          metodo_pagamento: metodo,
+          status: "CONCLUIDA"
+        }])
+        .select()
+        .single();
+
+      if (vendaError) throw vendaError;
+
+      // 2. Abater o estoque de cada produto (simplificado: abate unidades soltas)
+      const promessasEstoque = carrinho.map(item => {
+        const novoEstoqueSolto = (Number(item.unidades_soltas) || 0) - item.qtd;
+        return supabase.from("produtos").update({ unidades_soltas: novoEstoqueSolto }).eq("id", item.id);
+      });
+
+      await Promise.all(promessasEstoque);
+
+      alert("Venda finalizada com sucesso!");
+      setCarrinho([]);
+      setValorRecebido("");
+      
+      // Atualiza a lista para refletir o novo estoque
+      const { data } = await supabase.from("produtos").select("*").order("nome");
+      if (data) setProdutos(data);
+
+    } catch (error) {
+      alert("Erro ao finalizar venda. Tente novamente.");
+    } finally {
+      setIsFinalizando(false);
+    }
+  };
+
+  const produtosFiltrados = produtos.filter(p => p.nome.toLowerCase().includes(busca.toLowerCase()));
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex font-sans">
+    <div className="min-h-screen bg-[#F8FAFC] flex">
       <Sidebar />
-
-      <main className="flex-1 ml-64 p-10">
+      <main className="flex-1 ml-64 p-8 flex flex-col h-screen overflow-hidden">
         
-        {/* TOPBAR - Identica ao Protótipo */}
-        <header className="flex justify-between items-center mb-10">
-          <div className="flex items-center gap-4">
-            <div className="p-2 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors">
-              <Menu size={20} className="text-slate-500" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">Dashboard</h2>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest">Visão Geral do Negócio</p>
-            </div>
-          </div>
+        <PageHeader 
+          path={["Vendas", "PDV"]} 
+          title="Frente de Caixa" 
+          subtitle="Ponto de venda ágil"
+        />
 
-          <div className="flex items-center gap-8">
-            <Printer className="text-slate-300 cursor-pointer hover:text-slate-600 transition-colors" size={20} />
-            
-            <div className="flex items-center gap-4 border-l border-slate-200 pl-8">
-              <div className="text-right">
-                <p className="text-sm font-bold text-slate-700 leading-tight">Adega TK</p>
-                <p className="text-[11px] text-slate-400 font-medium">tininho2mil0@gmail.com</p>
-              </div>
-              <div className="w-10 h-10 bg-[#0088CC] rounded-2xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200">
-                TI
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* SEÇÃO DE ALERTAS - Com o badge vermelho */}
-        <section className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-red-50 rounded-xl">
-                <AlertTriangle className="text-red-500" size={22} />
-              </div>
-              <h3 className="text-lg font-bold text-slate-800">Alertas Inteligentes</h3>
-            </div>
-            <span className="bg-red-500 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
-              1 Crítico
-            </span>
-          </div>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 min-h-0">
           
-          <div className="group bg-red-50/40 border border-red-100 rounded-[1.5rem] p-5 flex items-center justify-between hover:bg-red-50 transition-all cursor-pointer">
-            <div className="flex items-center gap-5">
-              <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform">
-                <Package size={24} />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">Estoque Crítico detectado</p>
-                <p className="text-xs text-slate-500">Existem <span className="text-red-600 font-bold">4 produtos</span> que precisam de reposição imediata.</p>
-              </div>
+          {/* LADO ESQUERDO: LISTA DE PRODUTOS */}
+          <div className="lg:col-span-2 flex flex-col min-h-0 bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+            <div className="relative mb-6 shrink-0">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Buscar produto por nome ou código..." 
+                className="w-full pl-11 pr-4 py-3 bg-[#F8FAFC] border border-slate-100 rounded-xl outline-none text-sm focus:ring-2 focus:ring-blue-100"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+              />
             </div>
-            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-400 shadow-sm group-hover:text-red-500">
-              →
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+              {loading ? (
+                <p className="text-center text-slate-400 py-10">Carregando prateleira...</p>
+              ) : produtosFiltrados.map((p) => {
+                const totalUn = (Number(p.fardos || 0) * Number(p.un_por_fardo || 0)) + Number(p.unidades_soltas || 0);
+                const semEstoque = totalUn <= 0;
+
+                return (
+                  <div key={p.id} 
+                    onClick={() => !semEstoque && adicionarProduto(p)}
+                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                      semEstoque 
+                      ? "bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed" 
+                      : "bg-white border-slate-100 hover:border-blue-200 hover:shadow-sm cursor-pointer"
+                    }`}
+                  >
+                    <div>
+                      <h4 className="font-black text-slate-800 capitalize leading-tight">
+                        {p.nome} <span className="text-xs text-slate-400 font-normal ml-1">| {p.marca || "Ambev"}</span>
+                      </h4>
+                      <p className={`text-[10px] font-bold mt-1 uppercase ${semEstoque ? 'text-red-400' : 'text-slate-400'}`}>
+                        {semEstoque ? "Sem Estoque" : `${totalUn} unidades disponíveis`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-[#0088CC] text-lg">{formatBRL(p.preco_un)}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </section>
 
-        {/* GRID DE CARDS - Spacing ajustado */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatCard title="Vendas Hoje" value="0" sub="transações realizadas" icon={ShoppingCart} color="bg-blue-50 text-blue-500" />
-          <StatCard title="Produtos em Falta" value="4" sub="requer atenção" icon={Package} color="bg-orange-50 text-orange-500" border="border-orange-100" />
-          <StatCard title="Taxas (30d)" value="R$ 0,00" sub="custos operadoras" icon={ArrowDownRight} color="bg-slate-50 text-slate-400" />
-          <StatCard title="Perdas (30d)" value="R$ 0,00" sub="prejuízo operacional" icon={AlertTriangle} color="bg-red-50 text-red-400" />
-        </div>
-
-        {/* GRÁFICOS / RESUMO INFERIOR */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="md:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[300px]">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <TrendingUp size={18} className="text-blue-500" /> Faturamento Mensal
-              </h3>
-              <select className="text-xs font-bold text-slate-400 bg-slate-50 border-none rounded-lg p-2 outline-none">
-                <option>Últimos 30 dias</option>
-              </select>
-            </div>
-            <div className="h-full flex items-center justify-center text-slate-300 text-sm italic">
-              Gráfico de desempenho será renderizado aqui...
-            </div>
-          </div>
-
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between">
-            <div>
-              <h3 className="font-bold text-slate-800 mb-1">Lucro Líquido</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Últimos 30 dias</p>
-            </div>
+          {/* LADO DIREITO: CUPOM / CARRINHO */}
+          <div className="lg:col-span-1 flex flex-col min-h-0 bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             
-            <div className="py-6">
-              <h4 className="text-4xl font-black text-blue-600 leading-none">R$ 0,00</h4>
-              <div className="flex items-center gap-2 mt-2">
-                <span className="text-xs font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-lg">↘ 100.0%</span>
-                <span className="text-[10px] text-slate-400">vs 30 dias ant.</span>
-              </div>
+            {/* Header do Carrinho */}
+            <div className="p-6 border-b border-slate-50 bg-slate-900 text-white flex items-center gap-3 shrink-0">
+              <ShoppingCart size={20} className="text-blue-400" />
+              <h3 className="font-black text-lg">Cupom Atual</h3>
             </div>
 
-            <div className="pt-4 border-t border-slate-50">
-              <button className="w-full py-3 bg-slate-50 text-slate-600 text-xs font-bold rounded-2xl hover:bg-slate-100 transition-colors">
-                Ver Relatório Detalhado
+            {/* Itens do Carrinho */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+              {carrinho.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4">
+                  <ShoppingCart size={48} strokeWidth={1} />
+                  <p className="text-sm font-bold">Carrinho vazio</p>
+                </div>
+              ) : carrinho.map((item) => (
+                <div key={item.id} className="flex flex-col gap-2 pb-4 border-b border-slate-50">
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-black text-slate-800 capitalize leading-tight">{item.nome}</span>
+                    <span className="text-sm font-black text-slate-800">{formatBRL(item.preco_un * item.qtd)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-400 font-medium">{formatBRL(item.preco_un)} / un</span>
+                    <div className="flex items-center gap-3 bg-[#F8FAFC] rounded-lg p-1">
+                      <button onClick={() => alterarQtd(item.id, -1)} className="p-1 text-slate-400 hover:text-red-500 rounded-md bg-white shadow-sm"><Minus size={14}/></button>
+                      <span className="text-xs font-black w-4 text-center">{item.qtd}</span>
+                      <button onClick={() => alterarQtd(item.id, 1)} className="p-1 text-slate-400 hover:text-blue-500 rounded-md bg-white shadow-sm"><Plus size={14}/></button>
+                      <button onClick={() => removerProduto(item.id)} className="p-1 ml-2 text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Painel de Pagamento e Finalização */}
+            <div className="p-6 bg-[#F8FAFC] shrink-0 border-t border-slate-100">
+              <div className="flex justify-between items-center mb-6">
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Total</span>
+                <span className="text-3xl font-black text-[#0088CC]">{formatBRL(totalCarrinho)}</span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <PaymentBtn icon={QrCode} label="PIX" active={metodo === "PIX"} onClick={() => setMetodo("PIX")} />
+                <PaymentBtn icon={Banknote} label="Dinheiro" active={metodo === "DINHEIRO"} onClick={() => setMetodo("DINHEIRO")} />
+                <PaymentBtn icon={CreditCard} label="Cartão" active={metodo === "CARTAO"} onClick={() => setMetodo("CARTAO")} />
+              </div>
+
+              {metodo === "DINHEIRO" && (
+                <div className="flex gap-4 mb-4">
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Recebido</label>
+                    <input 
+                      type="number" 
+                      placeholder="R$ 0,00" 
+                      className="w-full p-3 rounded-xl outline-none font-bold text-sm border border-slate-200 focus:border-blue-400"
+                      value={valorRecebido}
+                      onChange={(e) => setValorRecebido(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Troco</label>
+                    <div className={`p-3 rounded-xl font-black text-sm border border-transparent ${troco < 0 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
+                      {troco < 0 ? "Falta " + formatBRL(Math.abs(troco)) : formatBRL(troco)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button 
+                onClick={finalizarVenda}
+                disabled={isFinalizando || carrinho.length === 0}
+                className={`w-full py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg ${
+                  carrinho.length === 0 ? 'bg-slate-200 text-slate-400 shadow-none cursor-not-allowed' : 'bg-[#0088CC] text-white hover:bg-[#0077b3] shadow-blue-100'
+                }`}
+              >
+                {isFinalizando ? "PROCESSANDO..." : "FINALIZAR VENDA"} <ArrowRight size={18} />
               </button>
             </div>
+
           </div>
         </div>
-
       </main>
     </div>
   );
 }
 
-function StatCard({ title, value, sub, icon: Icon, color, border = "border-slate-100" }: any) {
+// Botão de Seleção de Pagamento
+function PaymentBtn({ icon: Icon, label, active, onClick }: any) {
   return (
-    <div className={`bg-white p-7 rounded-[2rem] shadow-sm border ${border} flex flex-col justify-between h-44 hover:shadow-md transition-shadow`}>
-      <div className="flex justify-between items-start">
-        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</span>
-        <div className={`p-2 rounded-xl ${color}`}>
-          <Icon size={18} />
-        </div>
-      </div>
-      <div>
-        <h4 className="text-3xl font-black text-slate-800 tracking-tight">{value}</h4>
-        <p className="text-[10px] font-medium text-slate-400 mt-1">{sub}</p>
-      </div>
-    </div>
+    <button 
+      onClick={onClick}
+      className={`py-3 flex flex-col items-center justify-center gap-1 rounded-xl border transition-all ${
+        active 
+        ? "bg-slate-900 border-slate-900 text-white shadow-md" 
+        : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
+      }`}
+    >
+      <Icon size={18} />
+      <span className="text-[10px] font-bold uppercase">{label}</span>
+    </button>
   );
 }
